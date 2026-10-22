@@ -2,20 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>Eye → Space</title>
 <style>
-  html,body{margin:0;height:100%;background:#000;color:#7a7a7a;
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;
     font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
-  body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
-  canvas{width:min(100vw,1280px);height:auto;display:block}
-  p{margin:0 0 8px;text-align:center}
-  a{color:#c26b8a}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+  #c{display:block;cursor:zoom-in;background:#000;touch-action:manipulation}
+  #cap{color:#666;text-align:center;margin:0;pointer-events:none;
+    position:fixed;bottom:10px;left:0;right:0}
+  #cap a{color:#c26b8a;pointer-events:auto}
 </style>
 </head>
 <body>
 <canvas id="c" width="1280" height="720"></canvas>
-<p>Eye → Space — generated live in your browser, no video file.<br>
+<p id="cap">Eye → Space — live ASCII animation (every pixel is a monospace character) · click for fullscreen<br>
 python source: <a href="https://gist.github.com/DAGMAWI-YOSEPH/3bb4264882e1f81dd0af2a5bdcb9049d">gist</a></p>
 <script>
 
@@ -40,7 +41,6 @@ function mulberry32(a) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
 function smooth(a, b, t) {
   const x = Math.min(1, Math.max(0, (t - a) / (b - a)));
   return x * x * (3 - 2 * x);
@@ -48,14 +48,11 @@ function smooth(a, b, t) {
 const clip01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 const GX = new Float64Array(NC), GY = new Float64Array(NC);
-const RN = new Float64Array(NC), ANG = new Float64Array(NC);
 for (let r = 0; r < ROWS; r++) {
   for (let c = 0; c < COLS; c++) {
     const i = r * COLS + c;
     GX[i] = (c + 0.5) * CELL_W - W / 2;
     GY[i] = -((r + 0.5) * CELL_H - H / 2);
-    RN[i] = Math.hypot(GX[i], GY[i]) / (H * 0.3);
-    ANG[i] = Math.atan2(GY[i], GX[i]);
   }
 }
 
@@ -74,12 +71,25 @@ for (let i = 0; i < STAR_N; i++) {
   STAR_BIG[i] = rng_stable() < 0.35 ? 1 : 0;
 }
 
+function zoomAt(t) {
+  if (t <= 3) return 1;
+  if (t <= 9) return 1 + 0.12 * smooth(3, 9, t);
+  if (t <= 12.3) return 1.12 * Math.pow(9 / 1.12, smooth(9, 12.3, t));
+  return 9;
+}
+function gaze(t) {
+  const w = smooth(2.6, 4.2, t) * (1 - smooth(9.0, 10.4, t));
+  return [14 * Math.sin(t * 0.85) * w, 8 * Math.sin(t * 0.55 + 1.2) * w];
+}
+
 function renderFrame(t, fi, data) {
   data.fill(0);
-  const aS = smooth(0, 1.5, t) * (1 - smooth(8.5, 12, t));
-  const aI = smooth(1.5, 3.2, t) * (1 - smooth(8.5, 12, t));
-  const aH = smooth(11.5, 13.8, t);
-  const aSt = smooth(3.5, 6, t);
+  const aS = smooth(0, 1.5, t) * (1 - smooth(11.3, 12.7, t));
+  const aI = smooth(1.5, 3.2, t) * (1 - smooth(11.3, 12.7, t));
+  const aH = smooth(11.7, 13.9, t);
+  const aSt = smooth(8.8, 12.0, t);
+  const z = zoomAt(t);
+  const [ox, oy] = gaze(t);
 
   let star = null;
   if (aSt > 0.001) {
@@ -94,8 +104,7 @@ function renderFrame(t, fi, data) {
       if (b > star[idx]) star[idx] = b;
       if (STAR_BIG[i] && b > 0.45) {
         const nb = b * 0.55;
-        const nbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-        for (const [dr, dc] of nbors) {
+        for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
           const rr = row + dr, cc = col + dc;
           if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) {
             const j = rr * COLS + cc;
@@ -108,65 +117,105 @@ function renderFrame(t, fi, data) {
 
   const rngSpeck = mulberry32(1000 + ((fi / 2) | 0));
   const rngChar = mulberry32(fi + 4242);
-  const bob = Math.sin((t - 11.5) * 2.1) * H * 0.02;
+  const bob = Math.sin((t - 11.7) * 2.1) * H * 0.02;
   const flick = 0.75 + 0.25 * Math.sin(t * 7);
   const wipeR = 3.7 * smooth(0, 1.5, t);
+  const heartS = H * 0.3 * (0.38 + 0.62 * smooth(11.7, 14.2, t));
+  const eyeOn = aS > 0.001 || aI > 0.001;
+  const irisN = H * 0.29;
 
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const i = r * COLS + c;
       let R = 0, G = 0, B = 0, lum = 0;
 
-      if (aS > 0.001) {
-        const wipe = clip01((wipeR - RN[i]) * 3);
-        const keep = THRESH[i] < aS * wipe * 0.88 ? 1 : 0;
-        if (wipe * keep > 0) {
-          const m = wipe * keep;
-          const speck = rngSpeck();
-          let ves = Math.sin(VESSEL[i] * 53 + RN[i] * 7 + ANG[i] * 2) * 0.5 + 0.5 - 0.88;
-          ves = clip01(ves) * 5;
-          let sl = 0.48 + 0.34 * speck;
-          sl *= 1 - 0.15 * clip01(RN[i] - 2.2);
-          let sR = sl, sG = sl, sB = sl;
-          const vG = 0.62 + 0.3 * (1 - ves), vB = 0.58 + 0.3 * (1 - ves);
-          sR = sR * (1 - ves * 0.55) + 1 * (ves * 0.55);
-          sG = sG * (1 - ves * 0.55) + vG * (ves * 0.55);
-          sB = sB * (1 - ves * 0.55) + vB * (ves * 0.55);
-          R += Math.min(1, Math.max(0, sR)) * m;
-          G += Math.min(1, Math.max(0, sG)) * m;
-          B += Math.min(1, Math.max(0, sB)) * m;
-          lum = Math.max(lum, sl * m);
+      if (eyeOn) {
+        const srcX = ox + (GX[i] - ox) / z;
+        const srcY = oy + (GY[i] - oy) / z;
+        const dx = (GX[i] - ox) / z;
+        const dy = (GY[i] - oy) / z;
+        const u = srcX / (W * 0.46);
+        const wlid = 1 - u * u;
+        let inside = false, lidTop = 0, lidBot = 0;
+        if (wlid > 0) {
+          lidTop = H * 0.3 * Math.pow(wlid, 0.62);
+          lidBot = H * 0.35 * Math.pow(wlid, 0.75);
+          inside = srcY < lidTop && srcY > -lidBot;
+        }
+        const r2n = Math.hypot(dx, dy) / irisN;
+        const ANGd = Math.atan2(dy, dx);
+
+        if (inside) {
+          const rSrc = Math.hypot(srcX, srcY) / (H * 0.3);
+          const ASrc = Math.atan2(srcY, srcX);
+
+          // ---- sclera ----
+          const wipe = clip01((wipeR - rSrc) * 3);
+          const fillM = wipe * (THRESH[i] < aS * wipe * 0.88 ? 1 : 0);
+          if (fillM > 0) {
+            const speck = rngSpeck();
+            let sl = 0.62 + 0.38 * speck;
+            sl *= 1 - 0.28 * Math.pow(Math.abs(u), 2.0);
+            sl *= 1 - 0.3 * clip01((srcY - lidTop * 0.3) / Math.max(1, lidTop * 0.7));
+            const vv =
+              clip01(Math.sin(VESSEL[i] * 53 + rSrc * 7 + ASrc * 2) * 0.5 + 0.5 - 0.86) *
+              3.6 * smooth(0.32, 0.9, Math.abs(u));
+            const sR = sl, sG = sl * (1 - vv * 0.3), sB = sl * (1 - vv * 0.34);
+            R += Math.min(1, sR) * fillM;
+            G += Math.min(1, sG) * fillM;
+            B += Math.min(1, sB) * fillM;
+            lum = Math.max(lum, sl * fillM);
+          }
+
+          // ---- iris / pupil ----
+          if (aI > 0.001) {
+            const keep = THRESH[i] + 0.2 < aI + 0.35 ? 1 : 0;
+            const m = clip01(aI * keep);
+            const pupil = clip01((0.5 - r2n) / 0.05);
+            const fibers =
+              0.5 + 0.5 * Math.sin(ANGd * 48 + 3.1 * Math.sin(ANGd * 13 + 1.7) + r2n * 9 + 0.7 * Math.sin(ANGd * 29));
+            const rings = 0.86 + 0.14 * Math.sin(r2n * 34 + ANGd * 2);
+            const mid = clip01((r2n - 0.485) / 0.05) * clip01((1.03 - r2n) / 0.05);
+            const limbus = Math.exp(-Math.pow((r2n - 0.99) / 0.05, 2));
+            const coll = Math.exp(-Math.pow((r2n - 0.6) / 0.05, 2));
+            const hot = Math.exp(-Math.pow((r2n - 0.9) / 0.05, 2));
+            const irisLum =
+              mid * rings * (0.4 + 0.6 * fibers) * (1 - 0.92 * limbus) +
+              coll * 0.24 * mid + hot * 0.3 * mid;
+            const fig = Math.exp(-(Math.pow((dx + 4) / (W * 0.014), 2) + Math.pow((dy + H * 0.03) / (H * 0.05), 2)));
+            const fig2 = Math.exp(-(Math.pow((dx - 12) / (W * 0.012), 2) + Math.pow((dy + H * 0.07) / (H * 0.038), 2)));
+            const glint = Math.exp(-(Math.pow((dx + W * 0.05) / (W * 0.016), 2) + Math.pow((dy - H * 0.075) / (H * 0.03), 2)));
+            const glint2 = Math.exp(-(Math.pow((dx - W * 0.055) / (W * 0.02), 2) + Math.pow((dy + H * 0.08) / (H * 0.035), 2)));
+            const pupilLum = 0.2 * fig * pupil + 0.1 * fig2 * pupil + 1.5 * glint * pupil + 0.3 * glint2 * pupil;
+            const charLum = pupil * pupilLum + mid * clip01(0.3 + 0.7 * irisLum);
+            const core = clip01((1.04 - r2n) / 0.03) * m;
+            const ringK = 1 - 0.75 * limbus;
+            const iR = clip01(irisLum * 1.02) * ringK;
+            const iG = clip01(irisLum * 0.66 - limbus * 0.22) * ringK;
+            const iB = clip01(irisLum * 0.34 - limbus * 0.1) * ringK;
+            const addR = (iR + pupilLum * 0.9) * core;
+            const addG = (iG + pupilLum * 0.8) * core;
+            const addB = (iB + pupilLum * 0.7) * core;
+            R = R * (1 - core) + addR;
+            G = G * (1 - core) + addG;
+            B = B * (1 - core) + addB;
+            lum = Math.max(lum, core * charLum);
+          }
+        } else if (wlid > 0) {
+          let rim = 0;
+          if (srcY >= lidTop) rim = 0.16 * Math.exp(-(srcY - lidTop) / 7);
+          else if (srcY <= -lidBot) rim = 0.16 * Math.exp(-(-lidBot - srcY) / 7);
+          const rm = rim * Math.max(aS, aI);
+          if (rm > 0.005) { R += rm; G += rm; B += rm; lum = Math.max(lum, rm); }
+        } else {
+          const speck = rngSpeck(); // keep RNG stream stable across cells
         }
       }
 
-      if (aI > 0.001) {
-        const rr = RN[i];
-        const pupil = clip01((0.55 - rr) / 0.05);
-        const fibers = 0.5 + 0.5 * Math.sin(ANG[i] * 42 + 2.4 * Math.sin(ANG[i] * 11) + rr * 7);
-        const mid = clip01((rr - 0.55) / 0.08) * clip01((1.0 - rr) / 0.1);
-        const limbus = Math.exp(-Math.pow((rr - 0.94) / 0.05, 2));
-        const hot = Math.exp(-Math.pow((rr - 1.03) / 0.06, 2));
-        const irisLum = mid * (0.45 + 0.55 * fibers) * (1 - 0.85 * limbus) + 0.95 * hot * mid;
-        const fig = Math.exp(-(Math.pow((GX[i] + 4) / (W * 0.022), 2) + Math.pow((GY[i] + H * 0.03) / (H * 0.075), 2)));
-        const fig2 = Math.exp(-(Math.pow((GX[i] - 12) / (W * 0.016), 2) + Math.pow((GY[i] + H * 0.07) / (H * 0.05), 2)));
-        const glint = Math.exp(-(Math.pow((GX[i] + W * 0.055) / (W * 0.018), 2) + Math.pow((GY[i] - H * 0.1) / (H * 0.032), 2)));
-        const pupilLum = 0.9 * fig * pupil + 0.55 * fig2 * pupil + 1.5 * glint * pupil;
-        const charLum = pupil * pupilLum + mid * clip01(0.3 + 0.7 * irisLum);
-        const keep = THRESH[i] + 0.2 < aI + 0.35 ? 1 : 0;
-        const m = clip01(aI * keep);
-        const core = clip01(pupil + mid) * m;
-        const addR = (clip01(irisLum * 1.1) + pupilLum * 0.9) * core;
-        const addG = (clip01(irisLum * 0.55 - limbus * 0.35) + pupilLum * 0.8) * core;
-        const addB = (clip01(irisLum * 0.16 - limbus * 0.1) + pupilLum * 0.7) * core;
-        R = R * (1 - core) + addR;
-        G = G * (1 - core) + addG;
-        B = B * (1 - core) + addB;
-        lum = Math.max(lum, core * charLum);
-      }
-
+      // ---- heart ----
       if (aH > 0.001) {
-        const x = GX[i] / (H * 0.3);
-        const y = (GY[i] - bob) / (H * 0.3);
+        const x = GX[i] / heartS;
+        const y = (GY[i] - bob) / heartS;
         const eq = Math.pow(x * x + y * y - 1, 3) - x * x * Math.pow(y, 3);
         const band = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(((GY[i] - bob) / CELL_H) * 1.05 + 0.4));
         const h = clip01(clip01(-eq * 6) * 1.4) * band;
@@ -179,15 +228,18 @@ function renderFrame(t, fi, data) {
         lum = Math.max(lum, m * 0.9 * flick);
       }
 
+      // ---- stars (white in dark, dark sparkles on bright) ----
       if (star) {
-        const white = star[i] * (1 - aS);
-        const dark = star[i] * aS;
+        const bg = clip01(lum * 2.5);
+        const white = star[i] * (1 - bg);
+        const dark = star[i] * bg;
         lum = (lum + white * 0.95) * (1 - dark * 0.9);
         R = Math.max(R, white * 0.95) * (1 - dark * 0.9);
         G = Math.max(G, white * 0.96) * (1 - dark * 0.9);
         B = Math.max(B, white * 1.0) * (1 - dark * 0.9);
       }
 
+      // ---- pick character ----
       let ch;
       if (lum <= 0.04) ch = " ";
       else {
@@ -223,6 +275,24 @@ if (typeof document !== "undefined") {
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(W, H);
   const data = img.data;
+
+  function fit() {
+    const s = Math.min(innerWidth / W, innerHeight / H);
+    canvas.style.width = Math.round(W * s) + "px";
+    canvas.style.height = Math.round(H * s) + "px";
+  }
+  addEventListener("resize", fit);
+  fit();
+
+  canvas.addEventListener("click", () => {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      const fn = canvas.requestFullscreen || canvas.webkitRequestFullscreen;
+      if (fn) { const p = fn.call(canvas); if (p && p.catch) p.catch(() => {}); }
+    }
+  });
+
   let t0 = null;
   function loop(now) {
     if (t0 === null) t0 = now;
