@@ -6,18 +6,12 @@
 <title>Eye → Space</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#000;
-    font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
-  body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+    display:flex;align-items:center;justify-content:center}
   #c{display:block;cursor:zoom-in;background:#000;touch-action:manipulation}
-  #cap{color:#666;text-align:center;margin:0;pointer-events:none;
-    position:fixed;bottom:10px;left:0;right:0}
-  #cap a{color:#c26b8a;pointer-events:auto}
 </style>
 </head>
 <body>
 <canvas id="c" width="1280" height="720"></canvas>
-<p id="cap">Eye → Space — live ASCII animation (every pixel is a monospace character) · click for fullscreen<br>
-python source: <a href="https://gist.github.com/DAGMAWI-YOSEPH/3bb4264882e1f81dd0af2a5bdcb9049d">gist</a></p>
 <script>
 
 "use strict";
@@ -81,9 +75,9 @@ for (let i = 0; i < STAR_N; i++) {
   STAR_SP[i] = 2 + rng_stable() * 3;
   STAR_BIG[i] = rng_stable() < 0.28 ? 1 : 0;
 }
-const starPos = (i) => [
-  Math.trunc((H / 2 - STAR_Y[i]) / CELL_H),
-  Math.trunc((STAR_X[i] + W / 2) / CELL_W),
+const starPos = (i, zs = 1) => [
+  Math.trunc((H / 2 - STAR_Y[i] * zs) / CELL_H),
+  Math.trunc((STAR_X[i] * zs + W / 2) / CELL_W),
 ];
 for (let i = 0; i < STAR_N; i++) {
   const [row, col] = starPos(i);
@@ -123,9 +117,11 @@ function renderFrame(t, fi, data) {
   const zoom = Math.pow(2, 3.1 * smooth(6.0, 9.35, t));
   const sBri = clip01(smooth(8.0, 11.2, t) * 1.5);
   const eKill = (1 - smooth(8.3, 10.5, t)) * 1.3;
-  const aH = smooth(10.8, 13.9, t);
-  const heartS = H * 0.23 * (0.45 + 0.55 * smooth(10.8, 13.5, t));
-  const bob = Math.sin((t - 10.8) * 2.1) * H * 0.012;
+  const hZoom = smooth(9.4, 14.9, t);
+  const aH = smooth(9.3, 10.3, t);
+  const heartS = H * 0.028 * Math.pow(2, 5.05 * hZoom);
+  const bob = Math.sin(t * 1.7) * Math.min(H * 0.02, heartS * 0.07);
+  const zStar = Math.pow(2, 0.85 * hZoom);
   const flick = 0.92 + 0.08 * Math.sin(t * 5.5);
   const rngChar = mulberry32(fi + 4242);
   const gazePx = -gazeAmt(t) * irisN * 0.34;
@@ -137,7 +133,7 @@ function renderFrame(t, fi, data) {
     star.fill(0);
     for (let i = 0; i < STAR_N; i++) {
       const tw = 0.5 + 0.5 * Math.sin(t * STAR_SP[i] + STAR_PH[i]);
-      const [row, col] = starPos(i);
+      const [row, col] = starPos(i, zStar);
       if (row < 0 || row >= ROWS || col < 0 || col >= COLS) continue;
       const b = sBri * (0.45 + 0.55 * tw);
       const idx = row * COLS + col;
@@ -165,12 +161,12 @@ function renderFrame(t, fi, data) {
       if (TD[i] < eKill) {
         const EX0 = (GX[i] - gazePx) / zoom;
         const EY0 = (GY[i] - gazePy) / zoom;
-        const rx = irisN * 2.15;
+        const rx = irisN * 2.65;
         const nx = EX0 / rx;
         const inW = Math.abs(nx) < 1;
         const arc = inW ? Math.sqrt(1 - nx * nx) : 0;
-        const yTop = irisN * 1.02 * lid * arc;
-        const yBot = -irisN * 0.82 * lid * arc;
+        const yTop = irisN * 0.82 * lid * Math.pow(arc, 0.75);
+        const yBot = -irisN * 0.85 * lid * Math.pow(arc, 1.25);
         const inAp = inW && EY0 < yTop && EY0 > yBot;
         if (!inAp) {
           const lashW = irisN * 0.05;
@@ -287,7 +283,7 @@ function renderFrame(t, fi, data) {
         const dT = Math.max(Math.abs(x) - halfW, Math.max(y - 0.42, -y - 1.18));
         const d = Math.min(Math.min(d1, d2), dT);
         const fill = clip01(-d * 14);
-        const keep = THRESH[i] < aH * 6 + 0.05 ? 1 : 0;
+        const keep = THRESH[i] < aH * 6 + 0.05 + 0.3 * smooth(11.0, 14.6, t) ? 1 : 0;
         const band = 0.94 + 0.06 * Math.sin(y * 3.1 + 0.4);
         const m = fill * clip01(aH * 2.4) * keep * band;
         if (m > 0.01) {
