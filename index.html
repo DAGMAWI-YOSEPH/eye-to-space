@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Eye → Space</title>
+<title>Eye</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#000;
     display:flex;align-items:center;justify-content:center}
@@ -12,6 +12,7 @@
 </head>
 <body>
 <canvas id="c" width="1280" height="720"></canvas>
+<audio id="bgm" src="Bershy-Radio-SnapYT.App.mp3" preload="auto" loop></audio>
 <script>
 
 "use strict";
@@ -23,7 +24,6 @@ const COLS = W / CELL_W, ROWS = H / CELL_H, NC = ROWS * COLS;
 const FPS = 30, DURATION = 15.0;
 const LETTERS = [..."0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
 const SYMS = [..."?|/\\+*#%@&$!()<>^:;.·-'"];
-const STAR_CORE = [...".·*+:"];
 
 const ATLAS_BITS = {};
 for (const k in ATLAS) ATLAS_BITS[k] = ATLAS[k];
@@ -43,58 +43,22 @@ function smooth(a, b, t) {
 const clip01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 const GX = new Float64Array(NC), GY = new Float64Array(NC);
-const RN = new Float64Array(NC);
 for (let r = 0; r < ROWS; r++) {
   for (let c = 0; c < COLS; c++) {
     const i = r * COLS + c;
     GX[i] = (c + 0.5) * CELL_W - W / 2;
     GY[i] = -((r + 0.5) * CELL_H - H / 2);
-    RN[i] = Math.min(1, Math.hypot(GX[i] / (W * 0.5), GY[i] / (H * 0.5)) / 1.25);
   }
 }
 
 const rng_stable = mulberry32(7);
 const THRESH = new Float64Array(NC), VESSEL = new Float64Array(NC);
-const SPECK = new Float64Array(NC), TD = new Float64Array(NC);
+const SPECK = new Float64Array(NC);
 for (let i = 0; i < NC; i++) {
   THRESH[i] = rng_stable();
   VESSEL[i] = rng_stable();
   SPECK[i] = rng_stable();
-  TD[i] = 0.3 * THRESH[i] + 0.8 * (1 - RN[i]);
 }
-
-const STAR_N = 85;
-const STAR_X = new Float64Array(STAR_N), STAR_Y = new Float64Array(STAR_N);
-const STAR_PH = new Float64Array(STAR_N), STAR_SP = new Float64Array(STAR_N);
-const STAR_BIG = new Uint8Array(STAR_N);
-const STAR_KIND = new Uint8Array(NC);
-for (let i = 0; i < STAR_N; i++) {
-  STAR_X[i] = (rng_stable() * 2 - 1) * W * 0.48;
-  STAR_Y[i] = (rng_stable() * 2 - 1) * H * 0.48;
-  STAR_PH[i] = rng_stable() * Math.PI * 2;
-  STAR_SP[i] = 2 + rng_stable() * 3;
-  STAR_BIG[i] = rng_stable() < 0.28 ? 1 : 0;
-}
-const starPos = (i, zs = 1) => [
-  Math.trunc((H / 2 - STAR_Y[i] * zs) / CELL_H),
-  Math.trunc((STAR_X[i] * zs + W / 2) / CELL_W),
-];
-for (let i = 0; i < STAR_N; i++) {
-  const [row, col] = starPos(i);
-  if (row < 0 || row >= ROWS || col < 0 || col >= COLS) continue;
-  STAR_KIND[row * COLS + col] = 1;
-  if (STAR_BIG[i]) {
-    for (const [dr, dc, k] of [[-1, 0, 3], [1, 0, 3], [0, -1, 2], [0, 1, 2]]) {
-      const rr = row + dr, cc = col + dc;
-      if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) {
-        const j = rr * COLS + cc;
-        if (!STAR_KIND[j]) STAR_KIND[j] = k;
-      }
-    }
-  }
-}
-
-const STAR_BUF = new Float64Array(NC);
 
 const irisN = H * 0.33;
 function gazeAmt(t) {
@@ -112,44 +76,18 @@ function blinkAmt(t) {
 
 function renderFrame(t, fi, data) {
   data.fill(0);
-  const lid = smooth(0.25, 1.5, t) * (1 - blinkAmt(t));
+  const te = Math.min(t, 12.5);
+  const lid = smooth(0.25, 1.5, te) * (1 - blinkAmt(te));
   const aI = 1;
-  const zoom = Math.pow(2, 3.1 * smooth(6.0, 9.35, t));
-  const sBri = clip01(smooth(8.0, 11.2, t) * 1.5);
-  const eKill = (1 - smooth(8.3, 10.5, t)) * 1.3;
-  const hZoom = smooth(9.4, 14.9, t);
-  const aH = smooth(9.3, 10.3, t);
-  const heartS = H * 0.028 * Math.pow(2, 5.05 * hZoom);
-  const bob = Math.sin(t * 1.7) * Math.min(H * 0.02, heartS * 0.07);
-  const zStar = Math.pow(2, 0.85 * hZoom);
-  const flick = 0.92 + 0.08 * Math.sin(t * 5.5);
-  const rngChar = mulberry32(fi + 4242);
-  const gazePx = -gazeAmt(t) * irisN * 0.34;
-  const gazePy = gazeUp(t) * irisN * 0.2;
-
-  let star = null;
-  if (sBri > 0.001) {
-    star = STAR_BUF;
-    star.fill(0);
-    for (let i = 0; i < STAR_N; i++) {
-      const tw = 0.5 + 0.5 * Math.sin(t * STAR_SP[i] + STAR_PH[i]);
-      const [row, col] = starPos(i, zStar);
-      if (row < 0 || row >= ROWS || col < 0 || col >= COLS) continue;
-      const b = sBri * (0.45 + 0.55 * tw);
-      const idx = row * COLS + col;
-      if (b > star[idx]) star[idx] = b;
-      if (STAR_BIG[i]) {
-        const nb = b * 0.6;
-        for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          const rr = row + dr, cc = col + dc;
-          if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) {
-            const j = rr * COLS + cc;
-            if (nb > star[j]) star[j] = nb;
-          }
-        }
-      }
-    }
-  }
+  const zp = smooth(5.6, 12.5, te);
+  const zoom = Math.pow(2, 3.15 * zp);
+  const aH = smooth(5.7, 6.6, te);
+  const heartS = 9.7 * Math.pow(2, 5.3 * zp);
+  const bob = Math.sin(te * 1.7) * Math.min(H * 0.02, heartS * 0.07);
+  const flick = 0.92 + 0.08 * Math.sin(te * 5.5);
+  const rngChar = mulberry32(Math.floor(te * FPS) + 4242);
+  const gazePx = -gazeAmt(te) * irisN * 0.34;
+  const gazePy = gazeUp(te) * irisN * 0.2;
 
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -157,23 +95,41 @@ function renderFrame(t, fi, data) {
       let R = 0, G = 0, B = 0;
       let lit = false;
 
-      // ---- skin + eye: lids open, gaze, zoom into pupil ----
-      if (TD[i] < eKill) {
+      // ---- skin + eye: lids open, gaze, zoom into pupil with heart inside ----
+      {
         const EX0 = (GX[i] - gazePx) / zoom;
         const EY0 = (GY[i] - gazePy) / zoom;
         const rx = irisN * 2.65;
         const nx = EX0 / rx;
         const inW = Math.abs(nx) < 1;
-        const arc = inW ? Math.sqrt(1 - nx * nx) : 0;
-        const yTop = irisN * 0.82 * lid * Math.pow(arc, 0.75);
-        const yBot = -irisN * 0.85 * lid * Math.pow(arc, 1.25);
+        const u = (nx + 1) * 0.5;
+        const sT = inW ? Math.sin(Math.PI * Math.pow(u, 0.7)) : 0;
+        const sB = inW ? Math.sin(Math.PI * Math.pow(u, 1.05)) : 0;
+        const tilt = irisN * 0.12 * nx * lid;
+        const yTop = irisN * 0.86 * lid * Math.pow(Math.max(sT, 0), 0.75) + tilt;
+        const yBot = -irisN * 1.08 * lid * Math.pow(Math.max(sB, 0), 1.35) + tilt;
         const inAp = inW && EY0 < yTop && EY0 > yBot;
         if (!inAp) {
-          const lashW = irisN * 0.05;
           const dT = EY0 - yTop, dB = yBot - EY0;
-          if (inW && ((dT >= 0 && dT < lashW) || (dB >= 0 && dB < lashW))) {
-            R = 0.13; G = 0.09; B = 0.08; lit = true;
-          } else if (inW && lid > 0.25 && dT >= lashW + irisN * 0.1 && dT < lashW + irisN * 0.19) {
+          const lashWT = irisN * 0.1, lashWB = irisN * 0.04;
+          let lashHit = 0;
+          if (inW && lid > 0.3) {
+            if (dT >= lashWT && dT < lashWT + irisN * 0.26) {
+              const outT = dT - lashWT;
+              const hair = 0.5 + 0.5 * Math.sin(EX0 * 0.09 + VESSEL[i] * 3);
+              if (THRESH[i] < 0.3 * (1 - outT / (irisN * 0.26)) * (0.35 + 0.85 * hair)) lashHit = 1;
+            }
+            if (dB >= lashWB && dB < lashWB + irisN * 0.18) {
+              const outB = dB - lashWB;
+              const hair = 0.5 + 0.5 * Math.sin(EX0 * 0.15 + VESSEL[i] * 4);
+              if (THRESH[i] < 0.2 * (1 - outB / (irisN * 0.18)) * (0.3 + 0.9 * hair)) lashHit = 1;
+            }
+          }
+          if (inW && ((dT >= 0 && dT < lashWT) || (dB >= 0 && dB < lashWB))) {
+            R = 0.1; G = 0.07; B = 0.06; lit = true;
+          } else if (lashHit) {
+            R = 0.12; G = 0.08; B = 0.07; lit = true;
+          } else if (inW && lid > 0.25 && dT >= irisN * 0.45 && dT < irisN * 0.55) {
             R = 0.5; G = 0.33; B = 0.27; lit = true;
           } else {
             const pore = 0.86 + 0.14 * SPECK[i];
@@ -243,9 +199,9 @@ function renderFrame(t, fi, data) {
             if (pup > 0.001) {
               const fig = Math.exp(-(Math.pow((dx + 4) / (W * 0.014), 2) + Math.pow((dy + H * 0.03) / (H * 0.05), 2)));
               const fig2 = Math.exp(-(Math.pow((dx - 12) / (W * 0.012), 2) + Math.pow((dy + H * 0.07) / (H * 0.038), 2)));
-              const glint = Math.exp(-(Math.pow((dx + W * 0.05) / (W * 0.016), 2) + Math.pow((dy - H * 0.075) / (H * 0.03), 2)));
-              const glint2 = Math.exp(-(Math.pow((dx - W * 0.055) / (W * 0.02), 2) + Math.pow((dy + H * 0.08) / (H * 0.035), 2)));
-              const pupilLum = 0.2 * fig + 0.1 * fig2 + 1.5 * glint + 0.3 * glint2;
+              const glint = Math.exp(-(Math.pow((dx - W * 0.042) / (W * 0.013), 2) + Math.pow((dy - H * 0.055) / (H * 0.028), 2)));
+              const glint2 = Math.exp(-(Math.pow((dx + W * 0.05) / (W * 0.02), 2) + Math.pow((dy + H * 0.06) / (H * 0.035), 2)));
+              const pupilLum = 0.2 * fig + 0.1 * fig2 + 2.4 * glint + 0.22 * glint2;
               cr = cr * (1 - pup) + (0.085 + pupilLum * 0.9) * pup;
               cg = cg * (1 - pup) + (0.085 + pupilLum * 0.86) * pup;
               cb = cb * (1 - pup) + (0.1 + pupilLum * 0.78) * pup;
@@ -268,7 +224,7 @@ function renderFrame(t, fi, data) {
           const dim = (1 - lidSh) * (1 - cornerSh);
           R = cr * dim; G = cg * dim; B = cb * dim; lit = true;
         }
-        const fall = 1 - 0.92 * smooth(6.8, 9.3, t);
+        const fall = 1 - 0.55 * smooth(6.5, 10.5, te);
         R *= fall; G *= fall; B *= fall;
       }
 
@@ -283,7 +239,7 @@ function renderFrame(t, fi, data) {
         const dT = Math.max(Math.abs(x) - halfW, Math.max(y - 0.42, -y - 1.18));
         const d = Math.min(Math.min(d1, d2), dT);
         const fill = clip01(-d * 14);
-        const keep = THRESH[i] < aH * 6 + 0.05 + 0.3 * smooth(11.0, 14.6, t) ? 1 : 0;
+        const keep = THRESH[i] < aH * 6 + 0.35 ? 1 : 0;
         const band = 0.94 + 0.06 * Math.sin(y * 3.1 + 0.4);
         const m = fill * clip01(aH * 2.4) * keep * band;
         if (m > 0.01) {
@@ -302,42 +258,14 @@ function renderFrame(t, fi, data) {
         }
       }
 
-      // ---- stars: white dots / crosses on dark ----
-      let starKind = 0;
-      if (star) {
-        const s = star[i];
-        if (s > 0.05) {
-          const bg = clip01(Math.max(R, Math.max(G, B)) * 2.5);
-          const w = s * (1 - bg);
-          if (w > 0.05) {
-            R = Math.max(R, w);
-            G = Math.max(G, w * 0.99);
-            B = Math.max(B, w);
-            if (!lit) starKind = STAR_KIND[i] || 1;
-          }
-        }
-      }
-
       const mx = Math.max(R, Math.max(G, B));
       if (mx <= 0.045) continue;
 
       // ---- pick character ----
-      let ch;
-      if (starKind && !lit) {
-        if (starKind === 2) ch = rngChar() < 0.6 ? "-" : "=";
-        else if (starKind === 3) ch = "|";
-        else {
-          const q = rngChar();
-          ch = q < 0.68
-            ? STAR_CORE[(rngChar() * STAR_CORE.length) | 0]
-            : LETTERS[(rngChar() * LETTERS.length) | 0];
-        }
-      } else {
-        const q = rngChar();
-        ch = q < 0.8
-          ? LETTERS[(rngChar() * LETTERS.length) | 0]
-          : SYMS[(rngChar() * SYMS.length) | 0];
-      }
+      const q = rngChar();
+      const ch = q < 0.8
+        ? LETTERS[(rngChar() * LETTERS.length) | 0]
+        : SYMS[(rngChar() * SYMS.length) | 0];
 
       const bits = ATLAS_BITS[ch];
       if (!bits) continue;
@@ -383,6 +311,32 @@ if (typeof document !== "undefined") {
   });
 
   let t0 = null;
+  const bgm = document.getElementById("bgm");
+  const BGM_START = 83;
+  let audioStarted = false;
+  function startAudio() {
+    if (!bgm || audioStarted) return;
+    if (bgm.readyState >= 1 && (bgm.currentTime < BGM_START - 0.5 || bgm.currentTime > BGM_START + 120)) {
+      try { bgm.currentTime = BGM_START; } catch (e) {}
+    }
+    const p = bgm.play();
+    if (p && p.then) {
+      p.then(() => {
+        audioStarted = true;
+        if (t0 !== null && performance.now() - t0 > 4000) t0 = performance.now();
+      }).catch(() => {});
+    } else audioStarted = true;
+  }
+  if (bgm) {
+    bgm.addEventListener("loadedmetadata", () => {
+      try { bgm.currentTime = BGM_START; } catch (e) {}
+      startAudio();
+    });
+    addEventListener("pointerdown", startAudio);
+    addEventListener("keydown", startAudio);
+    startAudio();
+  }
+
   function loop(now) {
     if (t0 === null) t0 = now;
     const t = ((now - t0) / 1000) % DURATION;
