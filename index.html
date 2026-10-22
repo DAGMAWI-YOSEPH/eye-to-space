@@ -176,26 +176,49 @@ function renderFrame(t, fi, data) {
           const lashW = irisN * 0.05;
           const dT = EY0 - yTop, dB = yBot - EY0;
           if (inW && ((dT >= 0 && dT < lashW) || (dB >= 0 && dB < lashW))) {
-            R = 0.14; G = 0.1; B = 0.09; lit = true;
+            R = 0.13; G = 0.09; B = 0.08; lit = true;
+          } else if (inW && lid > 0.25 && dT >= lashW + irisN * 0.1 && dT < lashW + irisN * 0.19) {
+            R = 0.5; G = 0.33; B = 0.27; lit = true;
           } else {
-            const pore = 0.84 + 0.16 * SPECK[i];
-            const rosy = 0.5 + 0.5 * Math.sin(EX0 * 0.011 + 1.3) * Math.sin(EY0 * 0.014 - 0.7);
-            let sR = 0.95 * pore;
-            let sG = (0.7 - 0.06 * rosy) * pore;
-            let sB = (0.62 - 0.08 * rosy) * pore;
+            const pore = 0.86 + 0.14 * SPECK[i];
+            const blot = Math.sin(EX0 * 0.0055 + 2.1) * Math.sin(EY0 * 0.0048 - 1.2) +
+              0.5 * Math.sin((EX0 + EY0) * 0.0032);
+            const rosy = 0.5 + 0.5 * clip01(blot * 0.7 + 0.3);
+            const light = 1 + 0.1 * (-EX0 / 640 + EY0 / 360);
+            let sR = 0.94 * pore * light;
+            let sG = (0.71 - 0.07 * rosy) * pore * light * 0.98;
+            let sB = (0.63 - 0.09 * rosy) * pore * light * 0.95;
             if (THRESH[i] < 0.04) { sR *= 0.72; sG *= 0.58; sB *= 0.5; }
+            else if (THRESH[i] < 0.06) { sR = Math.min(1, sR * 1.05); sG *= 0.92; sB *= 0.9; }
+            const browD = clip01(1 - Math.pow(EX0 / (irisN * 1.9), 2));
+            const browY = clip01(1 - Math.abs(EY0 - irisN * 1.45) / (irisN * 0.24));
+            const browDens = browD * browY;
+            if (browDens > 0.03) {
+              const hair = 0.5 + 0.5 * Math.sin(EY0 * 0.45 + EX0 * 0.02 + VESSEL[i] * 2);
+              if (THRESH[i] < browDens * (0.3 + 0.6 * hair)) {
+                sR = 0.3 * pore; sG = 0.19 * pore; sB = 0.13 * pore;
+              } else if (THRESH[i] < browDens + 0.18) {
+                sR *= 0.86; sG *= 0.8; sB *= 0.78;
+              }
+            }
             if (inW) {
               const dOut = Math.min(Math.abs(EY0 - yTop), Math.abs(EY0 - yBot));
-              const sh = clip01(1 - dOut / (irisN * 0.55)) * 0.32;
+              const sh = clip01(1 - dOut / (irisN * 0.6)) * 0.38;
               sR *= 1 - sh; sG *= 1 - sh * 1.15; sB *= 1 - sh * 1.25;
             }
-            R = sR; G = sG; B = sB; lit = true;
+            R = Math.min(1, sR); G = Math.min(1, sG); B = Math.min(1, sB); lit = true;
           }
         } else {
           const sl = 0.88 + 0.12 * SPECK[i];
           let cr = Math.min(1, sl), cg = Math.min(1, sl * 0.97), cb = Math.min(1, sl * 0.94);
           const dx = EX0, dy = EY0;
           const r2n = Math.hypot(dx, dy) / irisN;
+          const vein =
+            clip01(Math.sin(VESSEL[i] * 61 + dx * 0.045 + dy * 0.02) * 0.5 + 0.5 - 0.93) * 4 *
+            clip01((Math.abs(dx) / rx - 0.35) / 0.5);
+          cr = Math.min(1, cr + vein * 0.28);
+          cg *= 1 - vein * 0.15;
+          cb *= 1 - vein * 0.12;
           if (aI > 0.001) {
             const keep = THRESH[i] < aI * 0.95 + 0.05 ? 1 : 0;
             const m = clip01(aI * 1.15) * keep;
@@ -210,7 +233,8 @@ function renderFrame(t, fi, data) {
             const hot = Math.exp(-Math.pow((r2n - 0.9) / 0.05, 2));
             const fw = Math.pow(0.15 + 0.85 * fibers, 1.6);
             const irisLum = mid * (rings * (0.22 + 0.78 * fw) * (1 - 0.8 * limbus) + coll * 0.3 + hot * 0.34);
-            const warm = clip01(irisLum * 1.55);
+            let warm = clip01(irisLum * 1.55);
+            if (THRESH[i] < 0.13) warm *= 0.35;
             if (warm > 0.001) {
               const oG = 0.5 - 0.12 * warm;
               const oB = 0.08 + 0.06 * (1 - warm);
@@ -237,28 +261,44 @@ function renderFrame(t, fi, data) {
           cr = Math.min(1, cr + halo * 0.9);
           cg = Math.min(1, cg + halo * 0.5);
           cb = Math.min(1, cb + halo * 0.12);
-          R = cr; G = cg; B = cb; lit = true;
+          if (dx < -rx * 0.87) {
+            const cm = clip01((dx + rx) / (rx * 0.13)) * 0.75;
+            cr = cr * (1 - cm) + 0.82 * cm;
+            cg = cg * (1 - cm) + 0.5 * cm;
+            cb = cb * (1 - cm) + 0.52 * cm;
+          }
+          const lidSh = clip01((EY0 - (yTop - irisN * 0.24)) / (irisN * 0.24)) * 0.45;
+          const cornerSh = clip01((Math.abs(dx) / rx - 0.55) / 0.45) * 0.5;
+          const dim = (1 - lidSh) * (1 - cornerSh);
+          R = cr * dim; G = cg * dim; B = cb * dim; lit = true;
         }
+        const fall = 1 - 0.92 * smooth(6.8, 9.3, t);
+        R *= fall; G *= fall; B *= fall;
       }
 
-      // ---- heart: full valentine, bright red-pink ----
+      // ---- heart: full icon heart (overlapping lobes + taper) ----
       if (aH > 0.001) {
-        const x = GX[i] / (heartS * 1.14);
-        const y = (GY[i] - bob + heartS * 0.16) / heartS;
-        const x2 = x * x, y2 = y * y;
-        const eq = Math.pow(x2 + y2 - 1, 3) - x2 * y2 * y * 1.1;
-        const fill = clip01(clip01(-eq * 10) * 1.25);
-        const keep = THRESH[i] < aH * 4 + 0.05 ? 1 : 0;
-        const band = 0.9 + 0.1 * Math.sin(y * 3.4 + 0.4);
+        const x = GX[i] / (heartS * 1.18);
+        const y = (GY[i] - bob + heartS * 0.2) / heartS;
+        const cy0 = 0.5;
+        const d1 = Math.hypot(x + 0.4, y - cy0) - 0.62;
+        const d2 = Math.hypot(x - 0.4, y - cy0) - 0.62;
+        const halfW = 0.98 * (y + 1.18) / 1.6;
+        const dT = Math.max(Math.abs(x) - halfW, Math.max(y - 0.42, -y - 1.18));
+        const d = Math.min(Math.min(d1, d2), dT);
+        const fill = clip01(-d * 14);
+        const keep = THRESH[i] < aH * 6 + 0.05 ? 1 : 0;
+        const band = 0.94 + 0.06 * Math.sin(y * 3.1 + 0.4);
         const m = fill * clip01(aH * 2.4) * keep * band;
         if (m > 0.01) {
           const sp = SPECK[i];
-          const gy01 = clip01((y + 1.05) / 2.3);
-          let hR = 0.98 + 0.02 * gy01;
-          let hG = 0.16 + 0.34 * Math.pow(gy01, 0.85);
-          let hB = 0.22 + 0.38 * Math.pow(gy01, 0.75);
-          if (sp < 0.07) { hR = 1; hG += 0.22; hB += 0.28; }
-          const v = m * flick * (0.92 + 0.14 * sp);
+          const gy01 = clip01((y + 1.18) / 2.3);
+          let hR = 0.94 + 0.06 * gy01;
+          let hG = 0.1 + 0.42 * Math.pow(gy01, 0.9);
+          let hB = 0.15 + 0.45 * Math.pow(gy01, 0.8);
+          if (sp < 0.06) { hR = 1; hG += 0.2; hB += 0.25; }
+          const spec = Math.exp(-(Math.pow((x + 0.42) / 0.34, 2) + Math.pow((y - 0.78) / 0.22, 2)));
+          const v = m * flick * (0.97 + 0.13 * sp + 0.3 * spec);
           R = Math.max(R, hR * v);
           G = Math.max(G, hG * v);
           B = Math.max(B, hB * v);
