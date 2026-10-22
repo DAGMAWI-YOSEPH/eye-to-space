@@ -313,28 +313,52 @@ if (typeof document !== "undefined") {
   let t0 = null;
   const bgm = document.getElementById("bgm");
   const BGM_START = 83;
-  let audioStarted = false;
-  function startAudio() {
-    if (!bgm || audioStarted) return;
-    if (bgm.readyState >= 1 && (bgm.currentTime < BGM_START - 0.5 || bgm.currentTime > BGM_START + 120)) {
-      try { bgm.currentTime = BGM_START; } catch (e) {}
-    }
-    const p = bgm.play();
-    if (p && p.then) {
-      p.then(() => {
-        audioStarted = true;
-        if (t0 !== null && performance.now() - t0 > 4000) t0 = performance.now();
-      }).catch(() => {});
-    } else audioStarted = true;
+  let playing = false, playTries = 0;
+  function resyncIfLate() {
+    if (t0 !== null && performance.now() - t0 > 4000) t0 = performance.now();
+  }
+  function tryPlay() {
+    if (!bgm || playing || playTries > 8) return;
+    playTries++;
+    let p;
+    try { p = bgm.play(); } catch (e) { setTimeout(tryPlay, 350); return; }
+    if (!p || !p.then) { playing = true; return; }
+    p.then(() => {
+      playing = true;
+      if (!bgm.muted) resyncIfLate();
+    }).catch((err) => {
+      if (err && err.name === "NotAllowedError") {
+        // audible autoplay blocked: start muted so the first tap is instant
+        bgm.muted = true;
+        let p2;
+        try { p2 = bgm.play(); } catch (e) { return; }
+        if (p2 && p2.then) p2.then(() => { playing = true; }).catch(() => {});
+        else playing = true;
+      } else {
+        // seek/load race (AbortError etc.): retry once playback is ready
+        setTimeout(tryPlay, 350);
+      }
+    });
+  }
+  function seekStart() {
+    try {
+      if (bgm.readyState >= 1 && bgm.currentTime < BGM_START + 1) bgm.currentTime = BGM_START;
+    } catch (e) {}
+  }
+  function onGesture() {
+    if (!bgm) return;
+    const wasMuted = bgm.muted;
+    if (bgm.muted) bgm.muted = false;
+    if (bgm.paused) tryPlay();
+    if (wasMuted && playing) resyncIfLate();
   }
   if (bgm) {
-    bgm.addEventListener("loadedmetadata", () => {
-      try { bgm.currentTime = BGM_START; } catch (e) {}
-      startAudio();
-    });
-    addEventListener("pointerdown", startAudio);
-    addEventListener("keydown", startAudio);
-    startAudio();
+    bgm.addEventListener("loadedmetadata", () => { seekStart(); tryPlay(); });
+    bgm.addEventListener("canplay", () => { if (bgm.currentTime < 1) seekStart(); tryPlay(); });
+    seekStart();
+    tryPlay();
+    addEventListener("pointerdown", onGesture);
+    addEventListener("keydown", onGesture);
   }
 
   function loop(now) {
