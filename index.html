@@ -1334,28 +1334,39 @@ function smileAmt(t) {
   return smooth(7.2, 7.9, t) * (1 - smooth(9.2, 9.6, t));
 }
 function winkAmt(t) {
-  // snap closed, hold, open slower — stays on the hero eye
-  return smooth(7.35, 7.58, t) * (1 - smooth(8.0, 8.95, t));
+  // OTHER eye snaps closed during the wide both-eyes hold, opens slower
+  return smooth(10.4, 10.65, t) * (1 - smooth(11.35, 12.45, t));
 }
 function loveAmt(t) {
   return smooth(10.5, 11.1, t) * (1 - smooth(11.9, 12.3, t));
 }
+function headAt(t) {
+  // roll + shift into the wink so it reads as head movement; settles before pan-in
+  const e = smooth(10.15, 11.05, t) * (1 - smooth(12.3, 13.3, t));
+  return [-irisN * 0.15 * e, irisN * 0.06 * e, 0.055 * e];
+}
+const WIDE_Z = 0.31;               // zoom where both eyes fit top-to-bottom
+const DIVE_A = 16.8, DIVE_B = 23.2; // dive through the pupil → explosion at 24
+function diveAmt(t) { return smooth(DIVE_A, DIVE_B, t); }
 function camAt(t) {
-  // 0–6.6 one eye held (hero); slight expand-in as the wink loads …
-  if (t < 6.6) return [0, 1];
-  if (t < 8.6) {
-    const k = smooth(6.6, 8.6, t);
-    return [0, 1 + 0.16 * k];
+  // P1 solo hero eye → P2 pull back to both-eyes wide → P3 hold while the
+  // other eye winks → P4 pan back into the hero eye (dive continues after)
+  if (t < 6.8) return [0, 1];
+  if (t < 9.8) {
+    // zoom out first, framing settles after (pan lags: k³) — keeps the hero
+    // eye off the screen edge while it is still large
+    const k = smooth(6.8, 9.8, t);
+    return [-SEPx * k * k * k, 1 - (1 - WIDE_Z) * k];
   }
-  // … then pull back through a both-view crossover and settle on the other eye
-  if (t < 10.6) {
-    const k = smooth(8.6, 10.6, t);
-    const dip = Math.sin(Math.PI * k);          // deepest ≈ 0.32 at midpoint
-    const z = 1.16 - 0.16 * k - 0.76 * dip;
-    const cx = -2 * SEPx * (k * k * (3 - 2 * k));
-    return [cx, z];
+  if (t < 13.2) return [-SEPx, WIDE_Z];
+  if (t < 17.0) {
+    // pan across while still wide, then push in (zoom lags: k³) — "pan into
+    // the eye, then get into the eye"
+    const k = smooth(13.2, 17.0, t);
+    const z = WIDE_Z + (1 - WIDE_Z) * k * k * k;
+    return [-SEPx * (1 - k), z];
   }
-  return [-2 * SEPx, 1];
+  return [0, 1];
 }
 
 // ── fireworks ──
@@ -1673,18 +1684,23 @@ function eyeShader(EX0, EY0, i, lid, smile, love, browLift, isHero) {
 }
 
 function eyeScene(i, t) {
-  const te = Math.min(t, 17.8);
+  const te = Math.min(t, DIVE_B);
   const smile = smileAmt(te);
   const wink = winkAmt(te);
   const love = loveAmt(te);
   let lidBase = smooth(1.75, 3.25, te) * (1 - blinkAmt(te));
-  const lidHero = lidBase * (1 - wink) * (1 - 0.14 * smile - 0.1 * love);
-  // during wink the other eye stays wide open for contrast
-  const lidOther = Math.min(1.06, lidBase * (1 - 0.32 * smile) * (1 + 0.22 * wink) * (1 - 0.06 * love));
+  // the FOLLOWED (hero) eye stays open through the wink for contrast; the other winks
+  const lidHero = Math.min(1.05, lidBase * (1 - 0.14 * smile - 0.1 * love) * (1 + 0.07 * wink));
+  const lidOther = lidBase * (1 - wink) * (1 - 0.3 * smile) * (1 - 0.06 * love);
   const [camX, camZ0] = camAt(te);
-  const zp = smooth(12.3, 17.8, te);
-  const zEff = camZ0 * Math.pow(2, 3.15 * zp);
+  const zp = diveAmt(te);
+  const zEff = camZ0 * Math.pow(2, 3.6 * zp);
   const wide = smooth(0.78, 0.40, camZ0);   // 0 close-up → 1 both-view
+
+  // head roll + shift during the wink (all features move together)
+  const [hTx, hTy, hTh] = headAt(te);
+  const hc = Math.cos(hTh), hs = Math.sin(hTh);
+  const fcxW = -SEPx;                       // face center between the eyes
 
   // gaze only in single-eye view; both-eye looks at camera
   const gzFade = clip01((camZ0 - 0.34) / 0.66);
@@ -1692,16 +1708,24 @@ function eyeScene(i, t) {
   const gazeU = (gazeUp(te) + 0.04 * Math.sin(te * 0.9) * love) * gzFade;
   const gazePx = -gazeL * irisN * 0.34;
   const gazePy = gazeU * irisN * 0.2;
+  const gxw = gazePx / zEff, gyw = gazePy / zEff;
 
-  // world coords
+  // world coords of this cell (camera applied)
   const wx = GX[i] / zEff + camX;
   const wy = GY[i] / zEff;
-  // hero eye local = world - heroOrigin(0,0); gaze applied in screen space
-  const EXh = (GX[i] - gazePx) / zEff + camX;
-  const EYh = (GY[i] - gazePy) / zEff;
-  // other eye at world (-2*SEPx, 0)
-  const EXo = (GX[i] - gazePx) / zEff + camX + 2 * SEPx;
-  const EYo = (GY[i] - gazePy) / zEff;
+  // inverse head transform → pattern space (skin/nose/hairline ride the head)
+  const hix = wx - fcxW - hTx, hiy = wy - hTy;
+  const pwx = fcxW + hc * hix + hs * hiy;
+  const pwy = -hs * hix + hc * hiy;
+  // eye centers, forward-transformed by the head move
+  const hrx = hc * SEPx + fcxW + hTx;
+  const hry = hs * SEPx + hTy;
+  const orx = -hc * SEPx + fcxW + hTx;
+  const ory = -hs * SEPx + hTy;
+  const EXh = wx - hrx - gxw;
+  const EYh = wy - hry - gyw;
+  const EXo = wx - orx - gxw;
+  const EYo = wy - ory - gyw;
 
   const rx = irisN * 2.65;
   let R = 0, G = 0, B = 0, lit = false;
@@ -1718,10 +1742,10 @@ function eyeScene(i, t) {
   if (!lit) {
     // face skin — always present
     const pore = 0.86 + 0.14 * SPECK[i];
-    const blot = Math.sin(wx * 0.004 + 2.1) * Math.sin(wy * 0.0035 - 1.2) +
-      0.5 * Math.sin((wx + wy) * 0.0025);
+    const blot = Math.sin(pwx * 0.004 + 2.1) * Math.sin(pwy * 0.0035 - 1.2) +
+      0.5 * Math.sin((pwx + pwy) * 0.0025);
     const rosy = 0.5 + 0.5 * clip01(blot * 0.7 + 0.3);
-    const light = 1 + 0.1 * (-wx / 900 + wy / 600);
+    const light = 1 + 0.1 * (-pwx / 900 + pwy / 600);
     let sR = 0.78 * pore * light;
     let sG = (0.54 - 0.05 * rosy) * pore * light * 0.98;
     let sB = (0.40 - 0.06 * rosy) * pore * light * 0.95;
@@ -1729,14 +1753,14 @@ function eyeScene(i, t) {
     // nose — partial ridge only: bridge shadow fades out before the nostrils,
     // soft side-light so it reads as a nose without drawing the whole thing
     if (wide > 0.01) {
-      const fcx = -SEPx;
-      const drop = -wy / irisN;                 // >0 below the eye line
+      const fcx = fcxW;
+      const drop = -pwy / irisN;                // >0 below the eye line
       const span = smooth(-1.9, -1.2, drop) * (1 - smooth(1.55, 2.65, drop));
-      const nxr = (wx - fcx) / irisN;
+      const nxr = (pwx - fcx) / irisN;
       const sig = 0.19 + 0.10 * clip01(drop / 2.4);   // widens as it descends
       const nsh = Math.exp(-Math.pow((nxr + 0.80 * sig) / (0.85 * sig), 2));
       const nhl = Math.exp(-Math.pow((nxr - 0.85 * sig) / (0.75 * sig), 2));
-      const nb = Math.exp(-Math.pow((wx + SEPx) / (SEPx * 0.30), 2));
+      const nb = Math.exp(-Math.pow((pwx + SEPx) / (SEPx * 0.30), 2));
       const m = wide * span;
       sR *= 1 - m * (0.09 * nb + 0.17 * nsh);
       sG *= 1 - m * (0.095 * nb + 0.175 * nsh);
@@ -1744,27 +1768,39 @@ function eyeScene(i, t) {
       const hl = m * 0.08 * nhl;
       sR = Math.min(1, sR + hl); sG = Math.min(1, sG + hl); sB = Math.min(1, sB + hl);
       // hairline at top of forehead
-      const hair = smooth(2.5, 3.15, wy / irisN) * wide;
+      const hair = smooth(2.5, 3.15, pwy / irisN) * wide;
       if (hair > 0.01) {
         const hairR = 0.13 * pore, hairG = 0.08 * pore, hairB = 0.06 * pore;
         sR = sR * (1 - hair) + hairR * hair;
         sG = sG * (1 - hair) + hairG * hair;
         sB = sB * (1 - hair) + hairB * hair;
       }
+      // face silhouette: temples/cheeks fall off when zoomed out so the wide
+      // shot reads as a head with a little black at the sides (never clips eyes)
+      const ax = Math.abs(pwx - fcx);
+      const sil = Math.max(
+        clip01((ax - irisN * 8.2) / (irisN * 0.5)),
+        clip01((pwy - irisN * 4.6) / (irisN * 0.8)) * 0.9
+      );
+      const sm = wide * sil * 0.95;
+      sR *= 1 - sm; sG *= 1 - sm * 0.98; sB *= 1 - sm * 0.96;
     }
     R = Math.min(1, sR); G = Math.min(1, sG); B = Math.min(1, sB);
     lit = true;
   }
 
-  const fall = 1 - 0.55 * smooth(13.0, 17.0, te);
+  const fall = 1 - 0.55 * smooth(17.5, 21.5, te);
   return [R * fall, G * fall, B * fall];
 }
 
 function heartOverlay(i, t, te) {
-  const zp = smooth(12.3, 17.8, te);
+  const zp = diveAmt(te);
   const aH = smooth(12.5, 13.6, te);
   if (aH <= 0.001) return null;
-  const heartS = 9.7 * Math.pow(2, 5.3 * zp);
+  // grows a proper little heart while it appears over the wide face, then rides the dive
+  const pre = smooth(12.5, 14.5, te);
+  const grow = Math.max(0.12, zp + 0.43 * pre * (1 - zp));
+  const heartS = 9.7 * Math.pow(2, 5.3 * grow);
   const bob = Math.sin(te * 1.7) * Math.min(H * 0.02, heartS * 0.07);
   const flick = 0.92 + 0.08 * Math.sin(te * 5.5);
   const x = GX[i] / (heartS * 1.18);
@@ -1833,7 +1869,7 @@ function renderFrame(t, fi, data) {
     renderMedia(t, data);
     return;
   }
-  const te = Math.min(t, 17.8);
+  const te = Math.min(t, DIVE_B);
   const rngChar = mulberry32(Math.floor(te * FPS) + 4242);
   const wipeProg = smooth(0.15, WIPE_END, t);
   const frontierY = wipeProg * H;
